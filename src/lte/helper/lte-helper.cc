@@ -91,6 +91,8 @@ LteHelper::DoInitialize (void)
 
   m_downlinkPathlossModel = m_dlPathlossModelFactory.Create ();
   Ptr<SpectrumPropagationLossModel> dlSplm = m_downlinkPathlossModel->GetObject<SpectrumPropagationLossModel> ();
+
+
   if (dlSplm != 0)
     {
       NS_LOG_LOGIC (this << " using a SpectrumPropagationLossModel in DL");
@@ -141,6 +143,7 @@ LteHelper::DoInitialize (void)
       m_fadingModule->Initialize ();
       m_downlinkChannel->AddSpectrumPropagationLossModel (m_fadingModule);
       m_uplinkChannel->AddSpectrumPropagationLossModel (m_fadingModule);
+      m_d2dChannel->AddSpectrumPropagationLossModel(m_fadingModule);
     }
   m_phyStats = CreateObject<PhyStatsCalculator> ();
   m_phyTxStats = CreateObject<PhyTxStatsCalculator> ();
@@ -606,7 +609,7 @@ Ptr<NetDevice>
 LteHelper::InstallSingleUeDevice (Ptr<Node> n)
 {
   NS_LOG_FUNCTION (this);
-  Ptr<LteSpectrumPhy> dlPhy = CreateObject<LteSpectrumPhy> ();
+  Ptr<LteSpectrumPhy> dlPhy = CreateObject<LteSpectrumPhy> ();//create 3 lteSpectrumPhy and 1 lteUePhy
   Ptr<LteSpectrumPhy> ulPhy = CreateObject<LteSpectrumPhy> ();
   Ptr<LteSpectrumPhy> d2dPhy = CreateObject<LteSpectrumPhy> ();
 
@@ -614,7 +617,7 @@ LteHelper::InstallSingleUeDevice (Ptr<Node> n)
 
   phy->SetD2dSpectrumPhy(d2dPhy);
 
-  Ptr<LteHarqPhy> harq = Create<LteHarqPhy> ();
+  Ptr<LteHarqPhy> harq = Create<LteHarqPhy> ();//set harq module
   dlPhy->SetHarqPhyModule (harq);
   ulPhy->SetHarqPhyModule (harq);
   d2dPhy->SetHarqPhyModule (harq);
@@ -742,10 +745,14 @@ LteHelper::InstallSingleUeDevice (Ptr<Node> n)
 
   n->AddDevice (dev);
   dlPhy->SetLtePhyRxDataEndOkCallback (MakeCallback (&LteUePhy::PhyPduReceived, phy));
+  d2dPhy->SetLtePhyRxDataEndOkCallback (MakeCallback (&LteUePhy::PhyPduD2dReceived, phy));
   dlPhy->SetLtePhyRxCtrlEndOkCallback (MakeCallback (&LteUePhy::ReceiveLteControlMessageList, phy));
   dlPhy->SetLtePhyRxPssCallback (MakeCallback (&LteUePhy::ReceivePss, phy));
   dlPhy->SetLtePhyDlHarqFeedbackCallback (MakeCallback (&LteUePhy::ReceiveLteDlHarqFeedback, phy));
   nas->SetForwardUpCallback (MakeCallback (&LteUeNetDevice::Receive, dev));
+
+  //m_d2dChannel->AddRx(d2dPhy);
+
 
   if (m_epcHelper != 0)
     {

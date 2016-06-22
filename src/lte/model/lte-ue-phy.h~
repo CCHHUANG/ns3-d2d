@@ -21,7 +21,7 @@
 
 #ifndef LTE_UE_PHY_H
 #define LTE_UE_PHY_H
-#define m_UeNum 100
+
 
 #include <ns3/lte-phy.h>
 #include <ns3/ff-mac-common.h>
@@ -42,13 +42,6 @@ class PacketBurst;
 class LteEnbPhy;
 class LteHarqPhy;
 
-typedef struct D2dDiscoveryResource
-  {
-    uint16_t d2dStartFrameNo;
-    uint16_t m_d2dStartFrameNo;
-    uint16_t m_d2dSubFrameNo;
-    uint16_t m_d2dRb;
-  }D2dDiscoveryResource;
 
 /**
  * \ingroup lte
@@ -223,8 +216,6 @@ public:
 
   void PhyPduD2dReceived (Ptr<Packet> p);
 
-  void InitializeD2dResoucrce();
-
   /**
   * \brief trigger from eNB the start from a new frame
   *
@@ -289,10 +280,7 @@ public:
     (uint16_t rnti, uint16_t cellId, double rsrp, double rsrq,
      bool isServingCell);
 
-  uint32_t m_ueId;
-  D2dDiscoveryResource m_d2dDiscoveryResource;
-
-  
+  int m_ueId;
 
 private:
 
@@ -503,15 +491,7 @@ private:
   Ptr<SpectrumValue> m_noisePsd; ///< Noise power spectral density for
                                  ///the configured bandwidth 
   Ptr<LteSpectrumPhy> m_d2dlinkSpectrumPhy;
-
-  static uint16_t m_ueCount;
-  static uint16_t m_d2dPeriodic;
-  static const float m_d2dErrorRate[10] ;
-  static bool m_d2dDiscoveryState[m_UeNum][m_UeNum] ;
-  static uint16_t m_d2dLinkTotalNum[100];
-  static uint16_t m_d2dDiscoveryNum;
-  static uint16_t m_d2dTurn;
-  bool m_d2dCorrupt;
+  static int m_ueCount;
 
 }; // end of `class LteUePhy`
 

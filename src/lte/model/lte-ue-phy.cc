@@ -37,12 +37,15 @@
 #include "lte-ue-mac.h"
 #include "ff-mac-common.h"
 #include "lte-chunk-processor.h"
+#include "lte-phy-tag.h"
+ #include "ns3/random-variable-stream.h"
 #include <ns3/lte-common.h>
 #include <ns3/pointer.h>
 #include <ns3/boolean.h>
 #include <ns3/lte-ue-power-control.h>
+#include <ns3/socket.h>
 
-
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -306,10 +309,63 @@ LteUePhy::GetTypeId (void)
   return tid;
 }
 
+uint16_t LteUePhy::m_ueCount = 0;
+uint16_t LteUePhy::m_d2dPeriodic = 20;
+uint16_t LteUePhy::m_d2dDiscoveryNum = 0;
+bool LteUePhy::m_d2dDiscoveryState[ m_UeNum ][ m_UeNum ] = {false};
+uint16_t LteUePhy::m_d2dTurn = 0;
+
+const float LteUePhy::m_d2dErrorRate[10] = { 
+    0.00082,
+    0.00137,
+    0.03243,
+    0.05951,
+    0.07213,
+    0.09364,
+    0.11563,
+    0.12379,
+    0.17533,
+    0.19575
+  };
+
+uint16_t LteUePhy::m_d2dLinkTotalNum[100] = {
+  1,1,3,6,10,
+  15,21,28,36,45,
+55,66,78,91,105,
+120,136,153,171,190,
+210,231,253,276,300,
+325,351,378,406,435,
+465,496,528,561,595,
+630,666,703,741,780,
+820,861,903,946,990,
+1035,1081,1128,1176,1225,
+1275,1326,1378,1431,1485,
+1540,1596,1653,1711,1770,
+1830,1891,1953,2016,2080,
+2145,2211,2278,2346,2415,
+2485,2556,2628,2701,2775,
+2850,2926,3003,3081,3160,
+3240,3321,3403,3486,3570,
+3655,3741,3828,3916,4005,
+4095,4186,4278,4371,4465,
+4560,4656,4753,4851,4950
+};
+
 void
 LteUePhy::DoInitialize ()
 {
   NS_LOG_FUNCTION (this);
+  m_ueId = m_ueCount ++;
+  m_d2dDiscoveryResource.d2dStartFrameNo = 3;
+  m_d2dDiscoveryResource.m_d2dStartFrameNo = ( m_ueId / 250 ) + m_d2dDiscoveryResource.d2dStartFrameNo;
+  m_d2dDiscoveryResource.m_d2dSubFrameNo = ( ( m_ueId % 250 ) / 25 ) +1;
+  m_d2dDiscoveryResource.m_d2dRb = m_ueId % 25;
+
+  std::cout<<"m_d2dDiscoveryResource "<<m_d2dDiscoveryResource.d2dStartFrameNo<<" "
+  <<m_d2dDiscoveryResource.m_d2dStartFrameNo<<" "
+  <<m_d2dDiscoveryResource.m_d2dSubFrameNo<<" "
+  <<m_d2dDiscoveryResource.m_d2dRb<<" "<<std::endl;
+
   bool haveNodeId = false;
   uint32_t nodeId = 0;
   if (m_netDevice != 0)
@@ -434,7 +490,58 @@ void
 LteUePhy::PhyPduReceived (Ptr<Packet> p)
 {
   NS_LOG_FUNCTION (this<<(*p));
+  std::cout<<"PhyPduReceived "<<p<<" "<<std::endl;
   m_uePhySapUser->ReceivePhyPdu (p);
+}
+
+void
+LteUePhy::PhyPduD2dReceived (Ptr<Packet> p)
+{
+  NS_LOG_FUNCTION (this<<(*p));
+  Ptr<UniformRandomVariable> value = CreateObject<UniformRandomVariable>();
+  double temp = value->GetValue(0.0,1.0);
+  m_d2dCorrupt = false;
+  if( m_ueCount >= 10 )
+  {
+    if( temp <= m_d2dErrorRate[9] )
+    {
+      m_d2dCorrupt = true;
+    }
+  }
+  else
+  {
+    if ( temp <= m_d2dErrorRate[ m_ueCount - 1 ] )
+    {
+      m_d2dCorrupt = true;
+    }
+  }
+
+  LtePhyTag tag;
+  p->PeekPacketTag(tag);
+
+  if( m_d2dCorrupt == false )
+  {
+   if(   m_d2dDiscoveryState[ (int)tag.GetCellId() ][ m_ueId ] == false &&  m_d2dDiscoveryState[ m_ueId ][ (int)tag.GetCellId() ] == false   )
+    {
+      m_d2dDiscoveryNum += 1;
+    }
+    std::cout<<"PhyPduD2dReceived "<<p<<" "<<(int)tag.GetCellId()<<"->"<<m_ueId<<std::endl;
+    m_d2dDiscoveryState[ (int)tag.GetCellId() ][ m_ueId ] = true;
+  }
+
+  if(  (m_ueId == (  (m_ueCount/25)*25 )) && ( (int)tag.GetCellId() == (m_ueCount - 1) ) )
+  {
+    m_d2dTurn = m_d2dTurn + 1;
+    std::ofstream outfile;
+    outfile.open("d2drate.txt",std::ios::app);
+    outfile<<float(m_d2dDiscoveryNum) /  float(m_d2dLinkTotalNum[ m_ueCount - 1 ]) <<" ";
+    if (m_d2dTurn == 5)
+    {
+      outfile<<""<<std::endl;
+    }
+    outfile.close();
+    std::cout<<"D2Ddiscoveryrate: "<<float(m_d2dDiscoveryNum) /  float(m_d2dLinkTotalNum[ m_ueCount - 1 ]) <<std::endl;
+  }
 }
 
 void
@@ -995,7 +1102,7 @@ LteUePhy::ReceiveLteControlMessageList (std::list<Ptr<LteControlMessage> > msgLi
           for (uint8_t i = 0; i < dci.m_tbsSize.size (); i++)
             {
               m_downlinkSpectrumPhy->AddExpectedTb (dci.m_rnti, dci.m_ndi.at (i), dci.m_tbsSize.at (i), dci.m_mcs.at (i), dlRb, i, dci.m_harqProcess, dci.m_rv.at (i), true /* DL */);
-              m_d2dlinkSpectrumPhy->AddExpectedTb (dci.m_rnti, dci.m_ndi.at (i), dci.m_tbsSize.at (i), dci.m_mcs.at (i), dlRb, i, dci.m_harqProcess, dci.m_rv.at (i), true /* DL */);
+              //m_d2dlinkSpectrumPhy->AddExpectedTb (dci.m_rnti, dci.m_ndi.at (i), dci.m_tbsSize.at (i), dci.m_mcs.at (i), dlRb, i, dci.m_harqProcess, dci.m_rv.at (i), true /* DL */);
             }
 
           SetSubChannelsForReception (dlRb);
@@ -1160,19 +1267,26 @@ void
 LteUePhy::SubframeIndication (uint32_t frameNo, uint32_t subframeNo)
 {
   NS_LOG_FUNCTION (this << frameNo << subframeNo);
-
+  std::cout<<" LteUePhy::SubframeIndication rfs "<<m_rnti<<" "<<frameNo<<" "<<subframeNo<<std::endl;
   NS_ASSERT_MSG (frameNo > 0, "the SRS index check code assumes that frameNo starts at 1");
+ 
 
+ 
   // refresh internal variables
+  
+
+
   m_rsReceivedPowerUpdated = false;
   m_rsInterferencePowerUpdated = false;
   m_pssReceived = false;
-  std::vector<int> d2dRb(25,0);
-  for(unsigned int i=0;i<d2dRb.size();i++) {
-    d2dRb[i]=i;
-  }
+  std::vector<int> d2dRb(1,0);
+  // for(unsigned int i=0;i<d2dRb.size();i++) {
+  //   d2dRb[i]=i;
+  // }
+  d2dRb[0]=m_d2dDiscoveryResource.m_d2dRb;
   SetSubChannelsForD2dTransmission(d2dRb);
   SetSubChannelsForD2dReception(d2dRb);
+m_ulConfigured=1;
   if (m_ulConfigured)
     {
       // update uplink transmission mask according to previous UL-CQIs
@@ -1212,7 +1326,7 @@ LteUePhy::SubframeIndication (uint32_t frameNo, uint32_t subframeNo)
               SetSubChannelsForTransmission (rbMask);
             }
           m_uplinkSpectrumPhy->StartTxDataFrame (pb, ctrlMsg, UL_DATA_DURATION);
-          //m_d2dlinkSpectrumPhy->StartTxDataFrame (pb, ctrlMsg, UL_DATA_DURATION);
+          std::cout<<" m_uplinkSpectrumPhy->StartTxDataFrame (pb, ctrlMsg, UL_DATA_DURATION); "<<" "<<(*pb->Begin())->GetSize()<<" "<<this<<std::endl;
         }
       else
         {
@@ -1230,13 +1344,29 @@ LteUePhy::SubframeIndication (uint32_t frameNo, uint32_t subframeNo)
               SetSubChannelsForTransmission (dlRb);
               NS_LOG_INFO(" dlRb.size()  "<<dlRb.size());
               m_uplinkSpectrumPhy->StartTxDataFrame (pb, ctrlMsg, UL_DATA_DURATION);
-             // m_d2dlinkSpectrumPhy->StartTxDataFrame (pb, ctrlMsg, UL_DATA_DURATION);
+              //std::cout<<" m_uplinkSpectrumPhy->StartTxDataFrame (pb, ctrlMsg, UL_DATA_DURATION); "<<this<<std::endl;
+              //m_d2dlinkSpectrumPhy->StartTxDataFrame (pb, ctrlMsg, UL_DATA_DURATION);
             }
           else
             {
               NS_LOG_LOGIC (this << " UE - UL NOTHING TO SEND");
             }
         }
+
+        Ptr<PacketBurst> d2dPb = CreateObject<PacketBurst>();
+        Ptr<Packet> d2dPacket = Create<Packet>(reinterpret_cast<const uint8_t*> ("hello"), 5);
+        LtePhyTag tag(m_ueId);
+        //tag.m_cellId(m_rnti);
+        if( ( frameNo % m_d2dPeriodic == m_d2dDiscoveryResource.m_d2dStartFrameNo) && 
+          ( subframeNo == m_d2dDiscoveryResource.m_d2dSubFrameNo )  ) {
+        std::cout<<"m_ueId"<<m_ueId<<std::endl;
+          d2dPacket->AddPacketTag(tag);
+          d2dPb->AddPacket(d2dPacket);
+          m_d2dlinkSpectrumPhy->StartTxDataFrame (d2dPb, ctrlMsg, UL_DATA_DURATION);
+          //m_d2dlinkSpectrumPhy->AddExpectedTb (dci.m_rnti, dci.m_ndi.at (i), dci.m_tbsSize.at (i), dci.m_mcs.at (i), dlRb, i, dci.m_harqProcess, dci.m_rv.at (i), true /* DL */);
+          std::cout<<"send to d2d "<<this<<" "<<m_ueId<<" "<<frameNo<<" "<<subframeNo<<std::endl;
+        }
+
     }  // m_configured
 
   // trigger the MAC
